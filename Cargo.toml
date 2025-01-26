@@ -1,0 +1,23 @@
+[workspace]
+members = [
+  "axum",
+  "std-rs",
+]
+resolver = "2"
+
+[lib]
+name = "plus"
+path = "plus-rs/lib.rs"
+
+[package]
+edition = "2021"
+name = "plus-rs"
+version = "0.1.0"
+
+[features]
+axum = ["dep:axum"]
+std-rs = ["dep:std-rs"]
+
+[dependencies]
+axum = {path = "axum", optional = true}
+std-rs = {path = "std-rs", optional = true}
