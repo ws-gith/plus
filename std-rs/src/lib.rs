@@ -6,7 +6,6 @@ use base64::{
     },
     DecodeError, Engine as _,
 };
-use serde::{de::value, Deserialize, Serialize, Serializer};
 use std::{fmt::Debug, marker::PhantomData};
 //  Re - export
 pub use derive_new::new;
@@ -55,20 +54,6 @@ macro_rules! err {
     ($err:expr) => {
         return Err($err)
     };
-}
-
-/// Safely lock a mutex, optionally returning an error on failure.
-#[macro_export]
-macro_rules! lock {
-    ($lock:expr) => {
-        $lock.lock().unwrap()
-    };
-    ($lock:expr, $error:expr) => {{
-        match $lock.lock() {
-            Ok(lock) => lock,
-            Err(_) => return $error,
-        }
-    }};
 }
 
 /// Clone an expression.
@@ -144,44 +129,91 @@ macro_rules! to_static {
     };
 }
 
-/// Create strings in various formats.
-#[doc = r#"
-string!() => Empty String
-
-string!(content) => String with content
-
-string!(u8: content) => String from u8
-
-string!(u8l: content) => String from lossy U8 (can fail)
-
-string!(u16: content) => String from u16
-
-string!(u16l: content) => String from lossy u16 (can fail)
-"#]
+/// A macro to create `String` instances in various formats.
+///
+/// # Usage
+/// ```rust
+/// use std_rs::string;
+///
+/// let empty = string!();
+/// let simple = string!("Hello, world!");
+/// let with_capacity = string!("Hello", 20);
+///
+/// let from_utf8 = string!(u8: vec![72, 101, 108, 108, 111]).unwrap();
+/// let from_utf8_lossy = string!(u8l: &[255, 72, 101, 108, 108, 111]);
+///
+/// let from_utf16 = string!(u16: &[72, 101, 108, 108, 111]).unwrap();
+/// let from_utf16_lossy = string!(u16l: &[72, 101, 108, 108, 111]);
+///
+/// let repeat_chars = string!(repeat: 'A', 5);
+/// let from_char_iter = string!(iter: ['H', 'e', 'l', 'l', 'o']);
+///
+/// let with_capacity_only = string!(capacity: 30);
+/// ```
+///
+/// # Supported Variants
+/// - `string!()` → Creates an empty `String`.
+/// - `string!(content)` → Converts input into a `String`.
+/// - `string!(content, capacity)` → Creates a `String` with initial capacity and content.
+/// - `string!(u8: content)` → Creates a `String` from `Vec<u8>`. Can fail.
+/// - `string!(u8l: content)` → Creates a lossy `String` from `&[u8]`.
+/// - `string!(u16: content)` → Creates a `String` from `&[u16]`. Can fail.
+/// - `string!(u16l: content)` → Creates a lossy `String` from `&[u16]`.
+/// - `string!(repeat: char, count)` → Creates a `String` by repeating a character `count` times.
+/// - `string!(iter: iterable)` → Creates a `String` from an iterator of characters.
+/// - `string!(capacity: size)` → Creates an empty `String` with the given capacity.
 #[macro_export]
 macro_rules! string {
+    // Empty string
     () => {
         String::new()
     };
+
+    // String from content
     ($content:expr) => {
         String::from($content)
     };
+
+    // String from content with specified capacity
     ($content:expr, $cap:expr) => {{
         let mut string = String::with_capacity($cap);
         string.push_str($content);
         string
     }};
+
+    // String from Vec<u8> (UTF-8), returns Result<String, Utf8Error>
     (u8: $content:expr) => {
         String::from_utf8($content)
     };
+
+    // Lossy String from &[u8] (UTF-8)
     (u8l: $content:expr) => {
-        String::from_utf8_lossy($content)
+        String::from_utf8_lossy($content).to_string()
     };
+
+    // String from &[u16] (UTF-16), returns Result<String, Utf16Error>
     (u16: $content:expr) => {
         String::from_utf16($content)
     };
+
+    // Lossy String from &[u16] (UTF-16)
     (u16l: $content:expr) => {
         String::from_utf16_lossy($content)
+    };
+
+    // Repeat a character `count` times
+    (repeat: $ch:expr, $count:expr) => {
+        std::iter::repeat($ch).take($count).collect::<String>()
+    };
+
+    // Create String from iterator of chars
+    (iter: $iterable:expr) => {
+        $iterable.into_iter().collect::<String>()
+    };
+
+    // Create String with specific capacity
+    (capacity: $size:expr) => {
+        String::with_capacity($size)
     };
 }
 
@@ -253,7 +285,8 @@ pub trait Encryption {
 }
 
 /// A struct representing a sensitive type with safe handling for display and serialization.
-#[derive(new, Deserialize, Clone, Eq, PartialEq)]
+#[derive(new, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize))]
 pub struct Sensitive<T> {
     content: T,
 }
@@ -299,23 +332,30 @@ where
 }
 
 // Implement `Serialize` to safely handle Sensitive serialization.
-impl<T> Serialize for Sensitive<T>
-where
-    T: Serialize,
-{
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+#[cfg(feature = "serde")]
+mod sensitive_serde {
+    use serde::{de::value, Serialize, Serializer};
+    impl<T> Serialize for Sensitive<T>
     where
-        S: Serializer,
+        T: Serialize,
     {
-        if cfg!(debug_assertions) {
-            // In debug mode, serialize the actual content.
-            self.content.serialize(serializer)
-        } else {
-            // In release mode, redact the content to prevent leaks.
-            serializer.serialize_str("<Content: REDACTED>")
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            if cfg!(debug_assertions) {
+                // In debug mode, serialize the actual content.
+                self.content.serialize(serializer)
+            } else {
+                // In release mode, redact the content to prevent leaks.
+                serializer.serialize_str("<Content: REDACTED>")
+            }
         }
     }
 }
+
+#[cfg(feature = "serde")]
+pub use sensitive_serde::*;
 
 impl<T> From<T> for Sensitive<T> {
     fn from(value: T) -> Self {
@@ -387,83 +427,11 @@ impl_encoding!(Standard, STANDARD, "STANDARD");
 impl_encoding!(UrlSafeNopad, URL_SAFE_NO_PAD, "URLSAFE NOPAD");
 impl_encoding!(StandardNopad, STANDARD_NO_PAD, "STANDARD NOPAD");
 
-#[derive(Default)]
-#[cfg_attr(test, derive(Debug, PartialEq))]
-pub struct Header<'a> {
-    pub aud: Option<&'a str>,
-
-    pub sub: Option<&'a str>,
-
-    pub iss: Option<&'a str>,
-
-    pub tid: Option<&'a str>,
-
-    pub nbf: Option<&'a str>,
-
-    pub iat: Option<&'a str>,
-
-    pub exp: Option<&'a str>,
-
-    /// Footer
-    pub ftr: Option<&'a str>,
-
-    /// Implicit assertions
-    pub ixa: Option<&'a str>,
-}
-
-#[doc = r#"Construct header
-
-aud = AudienceClaim
-
-sub = SubjectClaim
-
-iss = IssuerClaim
-
-tid = TokenIdentificationClaim
-
-nbf = Not Before claim
-
-iat = IssuedAtClaim
-
-exp = ExpirationClaim
-
-ftr = FooterClaim
-
-ixa = Implicit assertion claim
-```rust
-use lib_crypto::{header, Header};
-let header = header!("aud" => "aud", "sub" => "sub", "iss" => "iss");
-assert_eq!(header, Header{aud: Some("aud"), sub: Some("sub"), iss: Some("iss"), ..Default::default()});
-```"#]
-#[macro_export]
-macro_rules! header {
-    ($($ident:expr => $value:expr),+) => {{
-        let mut header = $crate::Header::default();
-        $(
-            match $ident {
-                "aud" => {header.aud = Some($value)},
-                "sub" => {header.sub = Some($value)},
-                "iss" => {header.iss = Some($value)},
-                "tid" => {header.tid = Some($value)},
-                "nbf" => {header.nbf = Some($value)},
-                "iat" => {header.iat = Some($value)},
-                "exp" => {header.exp = Some($value)},
-                "ftr" => {header.ftr = Some($value)},
-                "ixa" => {header.ixa = Some($value)},
-                _ => {},
-            }
-        )+
-
-        header
-    }};
-}
-
 #[cfg(test)]
 pub mod test {
     use super::*;
 
     use super::Sensitive;
-    use serde_json::to_string;
 
     #[test]
     fn test_sensitive_display() {
@@ -477,7 +445,10 @@ pub mod test {
     }
 
     #[test]
+    #[cfg(feature = "serde")]
     fn test_serializer_sensitive() {
+        use serde_json::to_string;
+
         let sensitive = Sensitive::new(string!("secret"));
 
         if cfg!(debug_assertions) {
@@ -485,13 +456,6 @@ pub mod test {
         } else {
             assert_eq!(to_string(&sensitive).unwrap(), "\"<Content: REDACTED>\"");
         }
-    }
-
-    #[test]
-    fn test_header() {
-        let header = crate::header!("aud" => "https://example.com", "sub" => "http://example.com");
-
-        println!("{:#?}", header);
     }
 
     /// Encode and Decode The value Passed testing the engine passed
