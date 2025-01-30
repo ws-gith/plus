@@ -1,8 +1,5 @@
 [workspace]
-members = [
-  "axum",
-  "std-rs",
-]
+members = [".", "axum", "std-rs"]
 resolver = "2"
 
 [lib]
@@ -15,9 +12,14 @@ name = "plus-rs"
 version = "0.1.0"
 
 [features]
+default = ["axum", "std-rs", "std-rs-serde"]
 axum = ["dep:axum"]
 std-rs = ["dep:std-rs"]
+std-rs-serde = ["std-rs/serde"]
 
 [dependencies]
-axum = {path = "axum", optional = true}
-std-rs = {path = "std-rs", optional = true}
+axum = { path = "axum", optional = true }
+std-rs = { path = "std-rs", optional = true }
+
+[dev-dependencies]
+serde_json = "1.0.138"

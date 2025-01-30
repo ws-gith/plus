@@ -702,6 +702,7 @@ name = "plus-rs"
 version = "0.1.0"
 dependencies = [
  "axum 0.1.0",
+ "serde_json",
  "std-rs",
 ]
 

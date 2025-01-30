@@ -334,7 +334,9 @@ where
 // Implement `Serialize` to safely handle Sensitive serialization.
 #[cfg(feature = "serde")]
 mod sensitive_serde {
-    use serde::{de::value, Serialize, Serializer};
+    use serde::{Serialize, Serializer};
+
+    use crate::Sensitive;
     impl<T> Serialize for Sensitive<T>
     where
         T: Serialize,
@@ -355,6 +357,7 @@ mod sensitive_serde {
 }
 
 #[cfg(feature = "serde")]
+#[allow(unused_imports)]
 pub use sensitive_serde::*;
 
 impl<T> From<T> for Sensitive<T> {
